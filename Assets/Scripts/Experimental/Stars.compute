@@ -1,0 +1,101 @@
+// inspired by / learned from
+// https://www.youtube.com/watch?v=X-iSQQgOd1A
+// https://catlikecoding.com/unity/tutorials/basics/compute-shaders/
+// https://www.youtube.com/watch?v=BrZ4pWwkpto
+// https://www.youtube.com/watch?v=kzwT3wQWAHE
+
+
+struct Entity
+{
+    float2 position;
+    float2 direction;
+};
+
+RWTexture2D<float4> display;
+vector <float, 4> background;
+vector <float, 4> foreground;
+float width;
+float height;
+float time;
+float speed;
+float disperseSpeed;
+float turnAngle;
+int entityCountRoot;
+
+///////////////////// from https://gist.github.com/h3r/3a92295517b2bee8a82c1de1456431dc
+
+float rand2dTo1d(float2 value, float2 dotDir = float2(12.9898, 78.233)){
+	float2 smallValue = sin(value);
+	float random = dot(smallValue, dotDir);
+	random = frac(sin(random) * 143758.5453);
+	return random;
+}
+
+//////////////////// 
+
+float2 GetMovement(Entity e)
+{
+    float angle = turnAngle * rand2dTo1d(e.direction + e.position);
+    // look further than move distance to prevent locking to pixel grid
+    float2 forward = 10 * e.direction;
+    // left turn
+    float2 left = 10 * float2(e.direction.x * cos(angle) - e.direction.y * sin(angle), e.direction.x * sin(angle) + e.direction.y * cos(angle));
+    // right turn
+    float2 right = 10 * float2(e.direction.x * cos(-angle) - e.direction.y * sin(-angle), e.direction.x * sin(-angle) + e.direction.y * cos(-angle));
+
+    float frontValue = display[int2(e.position + forward)].r + display[int2(e.position + forward)].g + display[int2(e.position + forward)].b + display[int2(e.position + forward)].a;
+    float leftValue = display[int2(e.position + left)].r + display[int2(e.position + left)].g + display[int2(e.position + left)].b + display[int2(e.position + left)].a;
+    float rightValue = display[int2(e.position + right)].r + display[int2(e.position + right)].g + display[int2(e.position + right)].b + display[int2(e.position + right)].a;
+
+    float2 movement = right;
+    if (leftValue > rightValue) movement = left;
+    if (frontValue > leftValue) movement = forward;
+
+    return (movement / 10) * speed * time;
+}
+
+
+// Each #kernel tells which function to compile; you can have many kernels
+#pragma kernel UpdateEntities
+#pragma kernel UpdateTexture
+
+
+RWStructuredBuffer<Entity> entities;
+
+[numthreads(8,8,1)]
+void UpdateEntities (uint3 id : SV_DispatchThreadID)
+{
+    Entity e = entities[id.x + id.y * entityCountRoot];
+    float2 movement = GetMovement(e);
+    e.position += movement;
+
+    if (e.position.x < 0) e.position.x = width - 1;
+    if (e.position.x >= width) e.position.x = 0;
+    if (e.position.y < 0) e.position.y = height - 1;
+    if (e.position.y >= height) e.position.y = 0;
+
+    entities[id.x + id.y * entityCountRoot].position = e.position;
+    entities[id.x + id.y * entityCountRoot].direction = normalize(movement);
+    display[e.position] = foreground;
+}
+
+
+[numthreads(8,8,1)]
+void UpdateTexture (uint3 id : SV_DispatchThreadID)
+{
+    float4 original = display[id.xy];
+    float4 diff = original - background;
+    float4 next = background + max(background, diff - disperseSpeed * time);
+
+    float4 blurred = 0;
+    blurred += next;
+    blurred += display[int2(id.x + 1, id.y)] + display[int2(id.x - 1, id.y)];;
+    blurred += display[int2(id.x, id.y + 1)] + display[int2(id.x, id.y - 1)];
+    blurred = blurred / 5;
+
+    display[id.xy] = blurred;
+}
+
+
+
+

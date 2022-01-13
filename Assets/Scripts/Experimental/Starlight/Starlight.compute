@@ -1,0 +1,99 @@
+// using method from https://www.karlsims.com/rd.html
+// inspired by https://www.youtube.com/watch?v=kzwT3wQWAHE
+
+
+
+// Each #kernel tells which function to compile; you can have many kernels
+#pragma kernel Update
+
+//struct Cell
+//{
+//    int2 position;
+//    float A;
+//    float B;
+//};
+
+
+// Create a RenderTexture with enableRandomWrite flag and set it
+// with cs.SetTexture
+RWTexture2D<float4> map;
+RWTexture2D<float4> display;
+//RWStructuredBuffer<Cell> cells;
+
+float4 colourA;
+float4 colourB;
+
+float diffA;
+float diffB;
+
+float feed;
+float kill;
+float time;
+float speed;
+
+int sampleRadius;
+
+[numthreads(8,8,1)]
+void Update (uint3 id : SV_DispatchThreadID)
+{
+    //uint w = 0;
+    //uint h = 0;
+    //display.GetDimensions(w, h);
+    //Cell c = cells[id.x + id.y * w];
+
+    // laplacian difference
+    float2 laplace = float2(0.0, 0.0);
+    float count = 0.0;
+
+    for (int i = -sampleRadius; i <= sampleRadius; i++)
+    {
+        for (int j = -sampleRadius; j <= sampleRadius; j++)
+        {
+            if (i == 0 && j == 0) continue;
+
+            float4 cell = map[int2(id.x + i, id.y + j)];
+
+            // sample corners less
+            if (abs(i) == sampleRadius && abs(j) == sampleRadius)
+            {
+                laplace += 0.05 * float2(cell.r, cell.g);
+                count += 0.05;
+            }
+            else if (abs(i) + abs(j) > sampleRadius)
+            {
+                laplace += 0.25 * float2(cell.r, cell.g);
+                count += 0.25;
+            }
+            else if (abs(i) + abs(j) == sampleRadius)
+            {
+                laplace += 0.5 * float2(cell.r, cell.g);
+                count += 0.5;
+            }
+            else
+            {
+                laplace += 0.75 * float2(cell.r, cell.g);
+                count += 0.75;
+            }
+        }
+    }
+
+
+
+    // this pixel / cell
+    float4 c = map[id.xy];
+
+    laplace = (laplace / count) - c;
+    //laplace = float2(0.1, 0.1);
+
+    float newA = c.r + diffA * laplace.x - c.r * c.g * c.g + feed * (1 - c.r);
+    float newB = c.g + diffB * laplace.y + c.r * c.g * c.g - (kill + feed) * c.g;
+
+    map[id.xy] = float4(newA, newB, newA - c.r, newB - c.g);
+
+    float4 alert = 0.0;
+    if (newA < 0.0) alert.r = 1.0;
+    if (newB > 1.0) alert.g = 1.0;
+
+    display[id.xy] = map[id.xy].g * colourB + map[id.xy].r * colourA + alert; // float4(newA, newB, 1.0, 1.0); //newA * colourA + newB * colourB;
+    //display[id.xy] = map[id.xy].g * colourB + map[id.xy].r * colourA - 200 * (map[id.xy].a * colourB + map[id.xy].b * colourA) + alert;
+}
